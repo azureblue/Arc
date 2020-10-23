@@ -4,8 +4,10 @@ sourceSets.main.resources.srcDirs = ["libs/linux64", "libs/macosx64","libs/windo
 dependencies {
     api libraries.sdl
 
-    testImplementation "com.badlogicgames.gdx:gdx-jnigen:1.9.10"
+    testImplementation "com.github.libgdx:gdx-jnigen:975fc696ee691301da870dcb67bc640d4ee14cf7"
+
     testImplementation aproj(":arc-core")
+    implementation aproj(":arc-core")
 }
 
 task deleteJniFolder(type: Delete) {
@@ -19,9 +21,9 @@ task sdlnatives(dependsOn: classes, type: JavaExec){
     main = 'NativesBuild'
     classpath = sourceSets.test.runtimeClasspath
     if(project.hasProperty("linux")) systemProperties.put("linux", "true")
-    if(project.hasProperty("dynamic")) systemProperties.put("dynamic", "true")
-    if(project.hasProperty("windows")) systemProperties.put("windows", "true")
-    if(project.hasProperty("mac")) systemProperties.put("mac", "true")
+    // if(project.hasProperty("dynamic")) systemProperties.put("dynamic", "true")
+    // if(project.hasProperty("windows")) systemProperties.put("windows", "true")
+    // if(project.hasProperty("mac")) systemProperties.put("mac", "true")
 }
 
 task glclassgen(dependsOn: classes, type: JavaExec){

@@ -26,7 +26,7 @@ test{
 
 buildscript{
     dependencies{
-        classpath "com.badlogicgames.gdx:gdx-jnigen:1.9.10"
+        classpath "com.github.libgdx:gdx-jnigen:975fc696ee691301da870dcb67bc640d4ee14cf7"
     }
 }
 
@@ -37,8 +37,8 @@ task deleteJniFolder(type: Delete) {
 
 clean.dependsOn(deleteJniFolder)
 
-task natives(dependsOn: [classes, deleteJniFolder]){
-    doLast{
+task natives {
+     doLast{
 
         def root = "$project.rootDir/arc-core"
         def jnidir = "$root/jni"
@@ -50,76 +50,34 @@ task natives(dependsOn: [classes, deleteJniFolder]){
             include "**"
             from "csrc/"
             into "jni/"
-        }
+        }        
 
         //download latest version of stb_image directly into jni folder
         "curl -o $jnidir/stb_image.h https://raw.githubusercontent.com/nothings/stb/master/stb_image.h".execute().waitFor()
+        
+        def isAarch64 = "gcc -dumpmachine".execute().text.contains("aarch64")
+       
+        BuildTarget target = BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Linux, isAarch64, true)
 
-        BuildTarget[] targets = [
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Windows, false),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Windows, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Linux, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Android, false),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.MacOsX, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.IOS, false)
-        ] as BuildTarget[]
 
-        targets*.cppExcludes = ["iosgl/**"] as String[]
+	    target.cFlags = "-c -march=armv8-a" + (isAarch64 ? "" : " -mfpu=neon-fp-armv8") + " -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0 -fpic"                
+        target.cppFlags = "-c -march=armv8-a" + (isAarch64 ? "" : " -mfpu=neon-fp-armv8") + " -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0 -fpic"
+        target.linkerFlags = "-shared -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0"        
 
-        def matches = { String path, List<String> pattern ->
-            return pattern.find{ path.contains(it) } != null
-        }
-
-        targets.find{ it.os == BuildTarget.TargetOs.IOS }.with{
-            if(it != null){
-                headerDirs = ["iosgl"] as String[]
-                cppExcludes = []
-            }
-        }
-
-        targets.find{ it.os == BuildTarget.TargetOs.MacOsX }.with{
-            if(it != null){
-                cppFlags = "-c -Wall -O2 -arch x86_64 -DFIXED_POINT -fmessage-length=0 -fPIC -mmacosx-version-min=10.7 -stdlib=libc++"
-                linkerFlags = "-shared -arch x86_64 -mmacosx-version-min=10.7 -stdlib=libc++"
-            }
-        }
-
-        new AntScriptGenerator().generate(new BuildConfig("arc", "$root/build", "libs/", jnidir), targets)
-
-        //overwrite incorrect application mkfile
-        new File("$jnidir/Application.mk").text = "APP_ABI := all\nAPP_PLATFORM := android-16"
+        new AntScriptGenerator().generate(new BuildConfig("arc", "$root/build", "libs/", jnidir), [target] as BuildTarget[])
 
         //set correct memcpy wrap contents...
         file("$jnidir/memcpy_wrap.c").text = file("$rootDir/natives/memcpy_wrap.c").text
         //wrap functions with right version of glibc
-        file("$jnidir/build-linux64.xml").text = file("$jnidir/build-linux64.xml").text.replace("-Wl,-wrap,memcpy", "-Wl,-wrap,memcpy,-wrap,pow")
+        //file("$jnidir/build-linux64.xml").text = file("$jnidir/build-linux64.xml").text.replace("-Wl,-wrap,memcpy", "-Wl,-wrap,memcpy,-wrap,pow")
 
-        for(BuildTarget target : targets){
-            if((target.os == BuildTarget.TargetOs.IOS || target.os == BuildTarget.TargetOs.MacOsX) != System.getProperty("os.name").toLowerCase().contains("mac")) continue
+        
+	    String buildFileName = "build-" + target.os.toString().toLowerCase() + (target.isARM ? "arm" : "") +  (target.is64Bit ? "64" : "32") + ".xml"            
+        BuildExecutor.executeAnt("$jnidir/" + buildFileName, "-Dhas-compiler=true -Drelease=true clean postcompile")
+        
 
-            String buildFileName = "build-" + target.os.toString().toLowerCase() + (target.is64Bit ? "64" : "32") + ".xml"
-            BuildExecutor.executeAnt("$jnidir/" + buildFileName, "-Dhas-compiler=true -Drelease=true clean postcompile")
-        }
-
-        new File(libdir).eachFileRecurse{ file ->
-            if(!file.path.contains("ios") && !file.path.contains("mac")){
-                "strip ${file.absolutePath}".execute().waitFor()
-            }
-        }
-
-        new File(libdir).eachFileRecurse{ target ->
-            if(!target.isDirectory() && matches(target.path, ["windows", "mac", "linux"])){
-                file("../natives/natives-desktop/libs/$target.name").bytes = target.bytes
-            }else if(!target.isDirectory() && target.path.contains("ios")){
-                file("../natives/natives-ios/libs").mkdirs()
-                file("../natives/natives-ios/libs/$target.name").bytes = target.bytes
-            }
-        }
-
-        copy{
-            include{ file -> matches(file.path, ["arm", "x86"]) && !file.path.contains("ios") }
-            from "libs/"
-            into "../natives/natives-android/libs/"
+        new File(libdir).eachFileRecurse{ f ->            
+            if(!f.isDirectory()) file("../natives/natives-desktop/libs/$f.name").bytes = f.bytes
         }
 
         //cleanup

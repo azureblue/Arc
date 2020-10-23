@@ -2,7 +2,7 @@ import com.badlogic.gdx.jnigen.*
 
 buildscript{
     dependencies{
-        classpath "com.badlogicgames.gdx:gdx-jnigen:1.9.10"
+        classpath "com.github.libgdx:gdx-jnigen:975fc696ee691301da870dcb67bc640d4ee14cf7"
     }
 }
 
@@ -63,43 +63,32 @@ task freetypeNatives(dependsOn: [classes, deleteJniFolder]){
         scriptFile.text = script
         "bash $scriptFile.absolutePath".execute().waitFor()
 
-        BuildTarget[] targets = [
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Windows, false),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Windows, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Linux, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Android, false),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.MacOsX, true),
-            BuildTarget.newDefaultTarget(BuildTarget.TargetOs.IOS, false)
-        ] as BuildTarget[]
+        def isAarch64 = "gcc -dumpmachine".execute().text.contains("aarch64")
+        BuildTarget target = BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Linux, isAarch64, true)
 
-        targets.each{
-            it.headerDirs = headers
-            it.cIncludes = sources
+        target.headerDirs = headers
+        target.cIncludes = sources
 
-            if(it.os == BuildTarget.TargetOs.MacOsX){
-                it.cppFlags = "-c -Wall -O2 -arch x86_64 -DFIXED_POINT -fmessage-length=0 -fPIC -mmacosx-version-min=10.7 -stdlib=libc++"
-                it.linkerFlags = "-shared -arch x86_64 -mmacosx-version-min=10.7 -stdlib=libc++ -framework CoreServices -framework Carbon"
-            }
+	    target.cFlags = "-c -march=armv8-a" + (isAarch64 ? "" : " -mfpu=neon-fp-armv8") + " -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0 -fpic"                
+        target.cppFlags = "-c -march=armv8-a" + (isAarch64 ? "" : " -mfpu=neon-fp-armv8") + " -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0 -fpic"
+        target.linkerFlags = "-shared -O2 -fno-stack-protector -D_FORTIFY_SOURCE=0"      
 
-            it.cFlags += "  -DFT2_BUILD_LIBRARY"
-            it.cppFlags += "  -DFT2_BUILD_LIBRARY"
-        }
-
+        target.cFlags += " -DFT2_BUILD_LIBRARY"  
+        target.cppFlags += " -DFT2_BUILD_LIBRARY"  
+        
         def matches = { String path, List<String> pattern ->
             return pattern.find{ path.contains(it) } != null
         }
 
-        new AntScriptGenerator().generate(new BuildConfig("arc-freetype", "$root/build", "libs/", jnidir), targets)
+        new AntScriptGenerator().generate(new BuildConfig("arc-freetype", "$root/build", "libs/", jnidir), [target] as BuildTarget[])
 
         //overwrite incorrect application mkfile
-        new File("$jnidir/Application.mk").text = "APP_ABI := all\nAPP_PLATFORM := android-16"
+        // new File("$jnidir/Application.mk").text = "APP_ABI := all\nAPP_PLATFORM := android-16"
 
-        for(BuildTarget target : targets){
-            if((target.os == BuildTarget.TargetOs.IOS || target.os == BuildTarget.TargetOs.MacOsX) != System.getProperty("os.name").toLowerCase().contains("mac")) continue
-
-            String buildFileName = "build-" + target.os.toString().toLowerCase() + (target.is64Bit ? "64" : "32") + ".xml"
-            BuildExecutor.executeAnt("$jnidir/" + buildFileName, "-Dhas-compiler=true -Drelease=true clean postcompile")
-        }
+        
+        String buildFileName = "build-" + target.os.toString().toLowerCase() + "arm" + (target.is64Bit ? "64" : "32") + ".xml"
+       	BuildExecutor.executeAnt("$jnidir/" + buildFileName, "-Dhas-compiler=true -Drelease=true clean postcompile")
+        
 
         new File(libdir).eachFileRecurse{ file ->
             if(!file.path.contains("ios") && !file.path.contains("mac")){
@@ -107,20 +96,11 @@ task freetypeNatives(dependsOn: [classes, deleteJniFolder]){
             }
         }
 
-        new File(libdir).eachFileRecurse{ target ->
-            if(!target.isDirectory() && matches(target.path, ["windows", "mac", "linux"])){
+        new File(libdir).eachFileRecurse{ f ->
+            if(!f.isDirectory()){
                 file("../../natives/natives-freetype-desktop/libs").mkdirs()
-                file("../../natives/natives-freetype-desktop/libs/$target.name").bytes = target.bytes
-            }else if(!target.isDirectory() && target.path.contains("ios")){
-                file("../../natives/natives-freetype-ios/libs").mkdirs()
-                file("../../natives/natives-freetype-ios/libs/$target.name").bytes = target.bytes
+                file("../../natives/natives-freetype-desktop/libs/$f.name").bytes = f.bytes
             }
-        }
-
-        copy{
-            include{ file -> matches(file.path, ["arm", "x86"]) && !file.path.contains("ios") }
-            from "libs/"
-            into "../../natives/natives-freetype-android/libs/"
         }
 
         //cleanup

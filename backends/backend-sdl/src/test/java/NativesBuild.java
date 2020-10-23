@@ -23,7 +23,7 @@ class NativesBuild{
         Seq<BuildTarget> targets = new Seq<>();
 
         if(compileMac){
-            BuildTarget mac64 = BuildTarget.newDefaultTarget(TargetOs.MacOsX, true);
+            BuildTarget mac64 = BuildTarget.newDefaultTarget(TargetOs.MacOsX, true, false);
 
             mac64.cIncludes = new String[]{};
             mac64.cFlags = mac64.cppFlags = execCmd("sdl2-config --cflags") + " -c -Wall -O2 -arch x86_64 -DFIXED_POINT -fmessage-length=0 -fPIC -mmacosx-version-min=10.9";
@@ -35,22 +35,38 @@ class NativesBuild{
 
         if(compileLinux){
             checkSDLVersion("sdl2-config", minSDLversion);
+            if (OS.isARM) {
+            BuildTarget linarm = BuildTarget.newDefaultTarget(BuildTarget.TargetOs.Linux, OS.is64Bit, true);
 
-            BuildTarget lin64 = BuildTarget.newDefaultTarget(TargetOs.Linux, true);
+                linarm.cIncludes = new String[]{};
 
-            lin64.cIncludes = new String[]{};
+    //		    if(defined("dynamic")){
+                linarm.cFlags = linarm.cFlags + " -march=armv8-a" + (OS.is64Bit ? "" : " -mfpu=neon-fp-armv8") + " -O2 " + execCmd("pkg-config --cflags glew glu gl sdl2 openal");
+                linarm.cppFlags = linarm.cFlags;
+                linarm.linkerFlags = "-shared" + " " + execCmd("pkg-config --libs glew glu gl sdl2 openal");
+    //		    }else{
+    //		      linarm.cppFlags =  linarm.cFlags = linarm.cFlags + " " + execCmd("sdl2-config --cflags");
+    //		      linarm.linkerFlags = "-shared";
+    //		      linarm.libraries = execCmd("sdl2-config --static-libs").replace("-lSDL2", "-l:libSDL2.a") + libsLinux;
+    //	 	    }
+            targets.add(linarm);
+            } else {
+                BuildTarget lin64 = BuildTarget.newDefaultTarget(TargetOs.Linux, true, false);
 
-            if(defined("dynamic")){
-              lin64.cFlags = lin64.cFlags + " " + execCmd("pkg-config --cflags glew glu gl sdl2 openal");
-              lin64.cppFlags = lin64.cFlags;
-              lin64.linkerFlags = "-shared -m64" + " " + execCmd("pkg-config --libs glew glu gl sdl2 openal");
-            }else{
-              lin64.cppFlags =  lin64.cFlags = lin64.cFlags + " " + execCmd("sdl2-config --cflags");
-              lin64.linkerFlags = "-shared -m64";
-              lin64.libraries = execCmd("sdl2-config --static-libs").replace("-lSDL2", "-l:libSDL2.a") + libsLinux;
+                lin64.cIncludes = new String[]{};
+
+                if(defined("dynamic")){
+                    lin64.cFlags = lin64.cFlags + " " + execCmd("pkg-config --cflags glew glu gl sdl2 openal");
+                    lin64.cppFlags = lin64.cFlags;
+                    lin64.linkerFlags = "-shared -m64" + " " + execCmd("pkg-config --libs glew glu gl sdl2 openal");
+                }else{
+                    lin64.cppFlags =  lin64.cFlags = lin64.cFlags + " " + execCmd("sdl2-config --cflags");
+                    lin64.linkerFlags = "-shared -m64";
+                    lin64.libraries = execCmd("sdl2-config --static-libs").replace("-lSDL2", "-l:libSDL2.a") + libsLinux;
+                }
+
+                targets.add(lin64);
             }
-
-            targets.add(lin64);
         }
 
         if(compileWindows){
@@ -73,18 +89,19 @@ class NativesBuild{
     }
 
     private static void buildScripts(BuildTarget... targets) throws Exception{
-        new NativeCodeGenerator().generate("src/main/java", "build/classes/java/main", "jni");
+        new NativeCodeGenerator().generate("src/main/java", "build/classes/java/main:../../arc-core/build/libs/arc-core-1.0.jar", "jni");
 
         new AntScriptGenerator().generate(new BuildConfig("sdl-arc"), targets);
 
-        for(BuildTarget target : targets){
-            String buildFileName = "build-" + target.os.toString().toLowerCase() + (target.is64Bit ? "64" : "32") + ".xml";
+        for(BuildTarget target : targets){	    
+            String buildFileName = "build-" +
+            target.os.toString().toLowerCase() + (target.isARM ? "arm" : "") + (target.is64Bit ? "64" : "32") + ".xml";
             BuildExecutor.executeAnt("jni/" + buildFileName, "-Dhas-compiler=true -Drelease=true clean postcompile");
         }
 
         for(BuildTarget target : targets){
             if(target.os != TargetOs.MacOsX){
-                exec("strip", "libs/" + target.os.name().toLowerCase() + (target.is64Bit ? "64" : "32") + "/" + target.libName);
+                exec("strip", "libs/" + target.os.toString().toLowerCase() + (target.isARM ? "arm" : "") + (target.is64Bit ? "64" : "32")  + "/" + target.libName);
             }
         }
     }
