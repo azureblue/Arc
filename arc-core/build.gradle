@@ -37,7 +37,7 @@ task deleteJniFolder(type: Delete) {
 
 clean.dependsOn(deleteJniFolder)
 
-task natives {
+task natives(dependsOn: [classes, deleteJniFolder]) {
      doLast{
 
         def root = "$project.rootDir/arc-core"
