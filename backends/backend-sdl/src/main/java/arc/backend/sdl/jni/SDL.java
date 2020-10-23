@@ -33,10 +33,7 @@ public class SDL{
                     return super.readFile(OS.is64Bit ? "OpenAL.dll" : "OpenAL32.dll");
                 }
             }.load("OpenAL32");
-        }else if(OS.isLinux){
-            new SharedLibraryLoader(){
-                @Override public String mapLibraryName(String libraryName){ return "lib" +libraryName + ".so"; }
-            }.load("openal");
+        }else if(OS.isLinux){            
         }
         new SharedLibraryLoader(){
             @Override
